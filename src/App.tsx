@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import {
   Activity,
@@ -62,6 +62,7 @@ const starterOutputPersistence: WorkflowFormOutputPersistence = {
 }
 
 function App() {
+  const workflowFormRef = useRef<HTMLFormElement>(null)
   const [state, setState] = useState<AppState>(emptyState)
   const [selectedProjectId, setSelectedProjectId] = useState('')
   const [statusMessage, setStatusMessage] = useState('')
@@ -308,6 +309,8 @@ function App() {
   }
 
   function editWorkflow(workflow: WorkflowDefinition) {
+    setErrorMessage('')
+    setStatusMessage(`Editing ${workflow.name}.`)
     setEditingWorkflowId(workflow.id)
     setWorkflowForm({
       name: workflow.name,
@@ -315,6 +318,15 @@ function App() {
       defaultRef: workflow.defaultRef,
       variablesText: variablesToText(workflow.variables),
       outputPersistence: toWorkflowFormOutputPersistence(workflow.outputPersistence),
+    })
+    window.requestAnimationFrame(() => {
+      workflowFormRef.current?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      })
+      workflowFormRef.current
+        ?.querySelector<HTMLInputElement>('input[name="workflow-name"]')
+        ?.focus({ preventScroll: true })
     })
   }
 
@@ -524,7 +536,12 @@ function App() {
 
             <div className="workflow-list">
               {state.workflows.map((workflow) => (
-                <article className="workflow-row" key={workflow.id}>
+                <article
+                  className={`workflow-row${
+                    editingWorkflowId === workflow.id ? ' editing' : ''
+                  }`}
+                  key={workflow.id}
+                >
                   <div>
                     <h3>{workflow.name}</h3>
                     <p>{workflow.description || 'No description set.'}</p>
@@ -785,7 +802,11 @@ function App() {
             </button>
           </form>
 
-          <form className="panel config-panel" onSubmit={(event) => void saveWorkflow(event)}>
+          <form
+            ref={workflowFormRef}
+            className="panel config-panel"
+            onSubmit={(event) => void saveWorkflow(event)}
+          >
             <div className="panel-heading">
               <div>
                 <h2>{editingWorkflowId ? 'Edit Workflow' : 'Add Workflow'}</h2>
@@ -796,6 +817,7 @@ function App() {
             <label>
               Name
               <input
+                name="workflow-name"
                 value={workflowForm.name}
                 onChange={(event) =>
                   setWorkflowForm((current) => ({

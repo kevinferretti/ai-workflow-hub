@@ -378,6 +378,11 @@ code {
   margin-top: 8px;
 }
 
+.workflow-row.editing {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+}
+
 .run-error {
   color: #b91c1c !important;
 }
