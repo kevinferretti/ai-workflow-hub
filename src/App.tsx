@@ -219,9 +219,7 @@ function App() {
           projectId: selectedProject.id,
           workflowId: workflow.id,
           ref: runForm.ref || undefined,
-          variables: parseVariables(
-            runForm.variablesText || defaultRunVariables(selectedProject),
-          ),
+          variables: parseVariables(runForm.variablesText),
         }),
       })
       const body = (await response.json()) as { error?: string; state?: AppState } | AppState
@@ -981,11 +979,10 @@ function EmptyPanel({ icon, title }: { icon: ReactNode; title: string }) {
 }
 
 function defaultRunVariables(project: ProjectConfig | undefined): string {
-  const variables = ['SKILL_OUTPUT_ARTIFACT=skill-output.md']
-  if (project?.repositoryUrl) {
-    variables.unshift(`SKILL_TARGET_URL=${project.repositoryUrl}`)
+  if (!project?.repositoryUrl) {
+    return ''
   }
-  return variables.join('\n')
+  return `SKILL_TARGET_URL=${project.repositoryUrl}`
 }
 
 function deriveProjectFromRepositoryUrl(
