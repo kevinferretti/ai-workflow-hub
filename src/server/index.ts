@@ -9,7 +9,7 @@ import { createApiRouter } from './routes.ts'
 
 const rootDir = resolve(fileURLToPath(new URL('../..', import.meta.url)))
 const productionMode = process.argv.includes('--production')
-const port = Number(process.env.PORT ?? 5173)
+const port = Number(process.env.PORT ?? 5174)
 
 async function createServer() {
   const app = express()

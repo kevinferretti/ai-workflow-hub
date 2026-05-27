@@ -40,6 +40,14 @@ const workflowSchema = z.object({
   description: z.string(),
   defaultRef: z.string(),
   variables: z.array(variableSchema),
+  outputPersistence: z
+    .object({
+      jobName: z.string(),
+      artifactPath: z.string(),
+      repositoryPath: z.string(),
+      commitMessage: z.string(),
+    })
+    .optional(),
 })
 
 const runSchema = z.object({
@@ -57,6 +65,19 @@ const runSchema = z.object({
   gitlabPipelineIid: z.number().optional(),
   webUrl: z.string().optional(),
   error: z.string().optional(),
+  outputPersistence: z
+    .object({
+      jobName: z.string(),
+      artifactPath: z.string(),
+      repositoryPath: z.string(),
+      commitMessage: z.string(),
+      status: z.enum(['pending', 'persisted', 'unchanged', 'failed']),
+      jobId: z.number().optional(),
+      action: z.enum(['created', 'updated', 'unchanged']).optional(),
+      updatedAt: z.string().optional(),
+      error: z.string().optional(),
+    })
+    .optional(),
 })
 
 const configSchema = z.object({

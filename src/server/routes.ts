@@ -10,12 +10,21 @@ import type {
   SaveWorkflowRequest,
   TriggerWorkflowRequest,
   WorkflowDefinition,
+  WorkflowOutputPersistence,
   WorkflowRun,
   WorkflowRunStatus,
+  WorkflowRunOutputPersistence,
   WorkflowVariable,
 } from '../shared/types.ts'
 
-export type GitLabClientLike = Pick<GitLabClient, 'createPipeline' | 'getPipeline'>
+export type GitLabClientLike = Pick<
+  GitLabClient,
+  | 'createPipeline'
+  | 'getPipeline'
+  | 'listPipelineJobs'
+  | 'downloadJobArtifactFile'
+  | 'upsertRepositoryFile'
+>
 
 export type CreateApiRouterOptions = {
   store?: ConfigStore
@@ -47,6 +56,14 @@ const saveWorkflowSchema = z.object({
   description: z.string().trim().optional().default(''),
   defaultRef: z.string().trim().optional().default(''),
   variables: z.array(variableSchema).default([]),
+  outputPersistence: z
+    .object({
+      jobName: z.string().trim().min(1),
+      artifactPath: z.string().trim().min(1),
+      repositoryPath: z.string().trim().min(1),
+      commitMessage: z.string().trim().min(1),
+    })
+    .optional(),
 })
 
 const triggerWorkflowSchema = z.object({
@@ -240,6 +257,7 @@ export function createApiRouter(options: CreateApiRouterOptions = {}): Router {
           gitlabPipelineId: pipeline.id,
           gitlabPipelineIid: pipeline.iid,
           webUrl: pipeline.web_url,
+          outputPersistence: toRunOutputPersistence(workflow.outputPersistence),
         }
         const updated = await store.update((current) => ({
           ...current,
@@ -287,19 +305,61 @@ export function createApiRouter(options: CreateApiRouterOptions = {}): Router {
         project.gitlabProjectId,
         run.gitlabPipelineId,
       )
-      const updated = await store.update((current) => ({
+      const refreshedRun: WorkflowRun = {
+        ...run,
+        status: normalizeStatus(pipeline.status),
+        webUrl: pipeline.web_url ?? run.webUrl,
+        updatedAt: new Date().toISOString(),
+      }
+      let updated = await store.update((current) => ({
         ...current,
         runs: current.runs.map((item) =>
-          item.id === run.id
-            ? {
-                ...item,
-                status: normalizeStatus(pipeline.status),
-                webUrl: pipeline.web_url ?? item.webUrl,
-                updatedAt: new Date().toISOString(),
-              }
-            : item,
+          item.id === run.id ? { ...item, ...refreshedRun } : item,
         ),
       }))
+
+      if (shouldPersistRunOutput(refreshedRun)) {
+        try {
+          const outputPersistence = await persistRunOutput(
+            client,
+            project.gitlabProjectId,
+            refreshedRun,
+          )
+          updated = await store.update((current) => ({
+            ...current,
+            runs: current.runs.map((item) =>
+              item.id === run.id
+                ? {
+                    ...item,
+                    outputPersistence,
+                    updatedAt: new Date().toISOString(),
+                  }
+                : item,
+            ),
+          }))
+        } catch (error) {
+          const outputPersistence = toFailedRunOutputPersistence(
+            refreshedRun.outputPersistence,
+            errorMessage(error),
+          )
+          updated = await store.update((current) => ({
+            ...current,
+            runs: current.runs.map((item) =>
+              item.id === run.id
+                ? {
+                    ...item,
+                    outputPersistence,
+                    updatedAt: new Date().toISOString(),
+                  }
+                : item,
+            ),
+          }))
+          response
+            .status(error instanceof GitLabApiError ? error.status : 502)
+            .json({ error: errorMessage(error), state: redactConfig(updated) })
+          return
+        }
+      }
 
       response.json(redactConfig(updated))
     } catch (error) {
@@ -353,6 +413,7 @@ function toWorkflowDefinition(payload: SaveWorkflowRequest): WorkflowDefinition 
     description: payload.description,
     defaultRef: payload.defaultRef,
     variables: payload.variables,
+    outputPersistence: payload.outputPersistence,
   }
 }
 
@@ -376,6 +437,92 @@ function mergeVariables(
 
 function normalizeStatus(status: WorkflowRunStatus | undefined): WorkflowRunStatus {
   return status ?? 'unknown'
+}
+
+function toRunOutputPersistence(
+  outputPersistence: WorkflowOutputPersistence | undefined,
+): WorkflowRunOutputPersistence | undefined {
+  if (!outputPersistence) {
+    return undefined
+  }
+
+  return {
+    ...outputPersistence,
+    status: 'pending',
+  }
+}
+
+function shouldPersistRunOutput(run: WorkflowRun): boolean {
+  return (
+    run.status === 'success' &&
+    run.gitlabPipelineId !== undefined &&
+    run.outputPersistence !== undefined &&
+    !['persisted', 'unchanged'].includes(run.outputPersistence.status)
+  )
+}
+
+async function persistRunOutput(
+  client: GitLabClientLike,
+  projectId: string,
+  run: WorkflowRun,
+): Promise<WorkflowRunOutputPersistence> {
+  if (!run.outputPersistence || run.gitlabPipelineId === undefined) {
+    throw new Error('Run output persistence is not configured.')
+  }
+
+  const jobs = await client.listPipelineJobs(projectId, run.gitlabPipelineId)
+  const job = jobs.find((item) => item.name === run.outputPersistence?.jobName)
+
+  if (!job) {
+    throw new Error(
+      `Job "${run.outputPersistence.jobName}" was not found in pipeline ${run.gitlabPipelineId}.`,
+    )
+  }
+
+  if (job.status !== 'success') {
+    throw new Error(
+      `Job "${job.name}" is ${job.status ?? 'unknown'}, so its artifact is not ready.`,
+    )
+  }
+
+  const content = await client.downloadJobArtifactFile(
+    projectId,
+    job.id,
+    run.outputPersistence.artifactPath,
+  )
+  const result = await client.upsertRepositoryFile(
+    projectId,
+    run.ref,
+    run.outputPersistence.repositoryPath,
+    content,
+    run.outputPersistence.commitMessage,
+  )
+
+  return {
+    ...run.outputPersistence,
+    repositoryPath: result.filePath,
+    status: result.action === 'unchanged' ? 'unchanged' : 'persisted',
+    action: result.action,
+    jobId: job.id,
+    updatedAt: new Date().toISOString(),
+    error: undefined,
+  }
+}
+
+function toFailedRunOutputPersistence(
+  outputPersistence: WorkflowRunOutputPersistence | undefined,
+  message: string,
+): WorkflowRunOutputPersistence | undefined {
+  if (!outputPersistence) {
+    return undefined
+  }
+
+  return {
+    ...outputPersistence,
+    status: 'failed',
+    updatedAt: new Date().toISOString(),
+    error: message,
+  }
 }
 
 function errorMessage(error: unknown): string {

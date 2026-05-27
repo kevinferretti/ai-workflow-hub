@@ -317,6 +317,12 @@ h3 {
   background: var(--panel-muted);
 }
 
+.run-controls {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
 .project-summary span {
   min-width: 0;
   overflow-wrap: anywhere;
@@ -374,6 +380,10 @@ code {
 
 .run-error {
   color: #b91c1c !important;
+}
+
+.output-note {
+  color: #475569 !important;
 }
 
 .row-actions {
@@ -499,6 +509,26 @@ textarea {
   min-height: 112px;
   font-family: var(--mono);
   font-size: 13px;
+}
+
+.checkbox-row {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+}
+
+.checkbox-row input {
+  width: 16px;
+  height: 16px;
+}
+
+.persistence-fields {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-muted);
 }
 
 input:focus,

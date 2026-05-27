@@ -38,7 +38,16 @@ const emptyState: AppState = {
   runs: [],
 }
 
-const starterVariables = 'WORKFLOW=codex_skill\nCODEX_SKILL='
+const starterVariables =
+  'WORKFLOW=codex_skill\nCODEX_SKILL=\nSKILL_OUTPUT_ARTIFACT=skill-output.md'
+
+const starterOutputPersistence = {
+  enabled: false,
+  jobName: 'codex_skill',
+  artifactPath: 'skill-output.md',
+  repositoryPath: 'skill-runs/skill-output.md',
+  commitMessage: 'Persist Codex skill output',
+}
 
 function App() {
   const [state, setState] = useState<AppState>(emptyState)
@@ -67,6 +76,11 @@ function App() {
     description: '',
     defaultRef: '',
     variablesText: starterVariables,
+    outputPersistence: starterOutputPersistence,
+  })
+  const [runForm, setRunForm] = useState({
+    ref: '',
+    variablesText: '',
   })
 
   useEffect(() => {
@@ -135,6 +149,10 @@ function App() {
       const lastProject = nextState.projects.at(-1)
       if (lastProject) {
         setSelectedProjectId(lastProject.id)
+        setRunForm({
+          ref: '',
+          variablesText: '',
+        })
       }
       setProjectForm({
         name: '',
@@ -155,6 +173,14 @@ function App() {
       description: workflowForm.description,
       defaultRef: workflowForm.defaultRef,
       variables: parseVariables(workflowForm.variablesText),
+      outputPersistence: workflowForm.outputPersistence.enabled
+        ? {
+            jobName: workflowForm.outputPersistence.jobName,
+            artifactPath: workflowForm.outputPersistence.artifactPath,
+            repositoryPath: workflowForm.outputPersistence.repositoryPath,
+            commitMessage: workflowForm.outputPersistence.commitMessage,
+          }
+        : undefined,
     })
     if (nextState) {
       setWorkflowForm({
@@ -162,6 +188,7 @@ function App() {
         description: '',
         defaultRef: '',
         variablesText: starterVariables,
+        outputPersistence: starterOutputPersistence,
       })
     }
     setIsSavingWorkflow(false)
@@ -184,6 +211,10 @@ function App() {
         body: JSON.stringify({
           projectId: selectedProject.id,
           workflowId: workflow.id,
+          ref: runForm.ref || undefined,
+          variables: parseVariables(
+            runForm.variablesText || defaultRunVariables(selectedProject),
+          ),
         }),
       })
       const body = (await response.json()) as { error?: string; state?: AppState } | AppState
@@ -220,6 +251,46 @@ function App() {
     await submitStateChange(`/api/workflows/${workflow.id}`, 'DELETE')
   }
 
+  function selectProject(project: ProjectConfig) {
+    setSelectedProjectId(project.id)
+    setRunForm({
+      ref: '',
+      variablesText: '',
+    })
+  }
+
+  function updateProjectRepositoryUrl(repositoryUrl: string) {
+    setProjectForm((current) => {
+      const derived = deriveProjectFromRepositoryUrl(repositoryUrl)
+      return {
+        ...current,
+        repositoryUrl,
+        name: current.name || derived?.name || '',
+        gitlabProjectId: current.gitlabProjectId || derived?.gitlabProjectId || '',
+      }
+    })
+
+    const derived = deriveProjectFromRepositoryUrl(repositoryUrl)
+    if (derived && (!gitlabForm.baseUrl || gitlabForm.baseUrl === 'https://gitlab.com')) {
+      setGitlabForm((current) => ({
+        ...current,
+        baseUrl: derived.baseUrl,
+      }))
+    }
+  }
+
+  function updateWorkflowOutputPersistence(
+    patch: Partial<typeof starterOutputPersistence>,
+  ) {
+    setWorkflowForm((current) => ({
+      ...current,
+      outputPersistence: {
+        ...current.outputPersistence,
+        ...patch,
+      },
+    }))
+  }
+
   async function submitStateChange(
     url: string,
     method: string,
@@ -237,6 +308,9 @@ function App() {
       setStatusMessage('Saved.')
       return nextState
     } catch (error) {
+      if (error instanceof ApiRequestError && error.state) {
+        setState(error.state)
+      }
       setErrorMessage(errorText(error))
       return undefined
     }
@@ -266,7 +340,7 @@ function App() {
                 type="button"
                 key={project.id}
                 className={project.id === selectedProject?.id ? 'selected' : ''}
-                onClick={() => setSelectedProjectId(project.id)}
+                onClick={() => selectProject(project)}
               >
                 <span>{project.name}</span>
                 <small>{project.defaultRef}</small>
@@ -371,10 +445,41 @@ function App() {
             </div>
 
             {selectedProject ? (
-              <div className="project-summary">
-                <span>{selectedProject.gitlabProjectId}</span>
-                <strong>{selectedProject.defaultRef}</strong>
-              </div>
+              <>
+                <div className="project-summary">
+                  <span>{selectedProject.gitlabProjectId}</span>
+                  <strong>{selectedProject.defaultRef}</strong>
+                </div>
+                <div className="run-controls">
+                  <label>
+                    Ref override
+                    <input
+                      value={runForm.ref}
+                      onChange={(event) =>
+                        setRunForm((current) => ({
+                          ...current,
+                          ref: event.target.value,
+                        }))
+                      }
+                      placeholder={selectedProject.defaultRef}
+                    />
+                  </label>
+                  <label>
+                    Run variables
+                    <textarea
+                      value={runForm.variablesText}
+                      placeholder={defaultRunVariables(selectedProject)}
+                      onChange={(event) =>
+                        setRunForm((current) => ({
+                          ...current,
+                          variablesText: event.target.value,
+                        }))
+                      }
+                      rows={4}
+                    />
+                  </label>
+                </div>
+              </>
             ) : (
               <EmptyPanel icon={<GitBranch size={22} />} title="Add a project first" />
             )}
@@ -386,6 +491,12 @@ function App() {
                     <h3>{workflow.name}</h3>
                     <p>{workflow.description || 'No description set.'}</p>
                     <code>{workflow.defaultRef || selectedProject?.defaultRef || 'ref unset'}</code>
+                    {workflow.outputPersistence ? (
+                      <p className="output-note">
+                        Persists {workflow.outputPersistence.artifactPath} to{' '}
+                        {workflow.outputPersistence.repositoryPath}
+                      </p>
+                    ) : null}
                   </div>
                   <div className="row-actions">
                     <button
@@ -441,6 +552,18 @@ function App() {
                       {run.ref} · {formatDate(run.createdAt)}
                     </p>
                     {run.error ? <p className="run-error">{run.error}</p> : null}
+                    {run.outputPersistence ? (
+                      <p
+                        className={
+                          run.outputPersistence.status === 'failed'
+                            ? 'run-error'
+                            : 'output-note'
+                        }
+                      >
+                        Output {run.outputPersistence.status}: {run.outputPersistence.repositoryPath}
+                        {run.outputPersistence.error ? ` - ${run.outputPersistence.error}` : ''}
+                      </p>
+                    ) : null}
                   </div>
                   <div className="row-actions">
                     {run.webUrl ? (
@@ -574,12 +697,8 @@ function App() {
                 Repo URL
                 <input
                   value={projectForm.repositoryUrl}
-                  onChange={(event) =>
-                    setProjectForm((current) => ({
-                      ...current,
-                      repositoryUrl: event.target.value,
-                    }))
-                  }
+                  onChange={(event) => updateProjectRepositoryUrl(event.target.value)}
+                  placeholder="https://labs.gauntletai.com/kevinferretti/shipshape"
                 />
               </label>
             </div>
@@ -665,6 +784,70 @@ function App() {
                 rows={5}
               />
             </label>
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={workflowForm.outputPersistence.enabled}
+                onChange={(event) =>
+                  updateWorkflowOutputPersistence({
+                    enabled: event.target.checked,
+                  })
+                }
+              />
+              Persist artifact output
+            </label>
+            {workflowForm.outputPersistence.enabled ? (
+              <div className="persistence-fields">
+                <label>
+                  Artifact job
+                  <input
+                    value={workflowForm.outputPersistence.jobName}
+                    onChange={(event) =>
+                      updateWorkflowOutputPersistence({
+                        jobName: event.target.value,
+                      })
+                    }
+                    required
+                  />
+                </label>
+                <label>
+                  Artifact path
+                  <input
+                    value={workflowForm.outputPersistence.artifactPath}
+                    onChange={(event) =>
+                      updateWorkflowOutputPersistence({
+                        artifactPath: event.target.value,
+                      })
+                    }
+                    required
+                  />
+                </label>
+                <label>
+                  Repository path
+                  <input
+                    value={workflowForm.outputPersistence.repositoryPath}
+                    onChange={(event) =>
+                      updateWorkflowOutputPersistence({
+                        repositoryPath: event.target.value,
+                      })
+                    }
+                    required
+                  />
+                </label>
+                <label>
+                  Commit message
+                  <input
+                    value={workflowForm.outputPersistence.commitMessage}
+                    onChange={(event) =>
+                      updateWorkflowOutputPersistence({
+                        commitMessage: event.target.value,
+                      })
+                    }
+                    required
+                  />
+                </label>
+              </div>
+            ) : null}
             <button type="submit" className="primary-button" disabled={isSavingWorkflow}>
               {isSavingWorkflow ? (
                 <Loader2 size={16} className="spin" aria-hidden="true" />
@@ -741,11 +924,43 @@ function EmptyPanel({ icon, title }: { icon: ReactNode; title: string }) {
   )
 }
 
+function defaultRunVariables(project: ProjectConfig | undefined): string {
+  const variables = ['SKILL_OUTPUT_ARTIFACT=skill-output.md']
+  if (project?.repositoryUrl) {
+    variables.unshift(`SKILL_TARGET_URL=${project.repositoryUrl}`)
+  }
+  return variables.join('\n')
+}
+
+function deriveProjectFromRepositoryUrl(
+  repositoryUrl: string,
+): { baseUrl: string; gitlabProjectId: string; name: string } | undefined {
+  try {
+    const url = new URL(repositoryUrl)
+    const gitlabProjectId = decodeURIComponent(url.pathname)
+      .replace(/^\/+|\/+$/g, '')
+      .replace(/\.git$/, '')
+
+    if (!gitlabProjectId) {
+      return undefined
+    }
+
+    const name = gitlabProjectId.split('/').at(-1)?.replace(/[-_]/g, ' ') ?? ''
+    return {
+      baseUrl: url.origin,
+      gitlabProjectId,
+      name: titleCase(name),
+    }
+  } catch {
+    return undefined
+  }
+}
+
 async function apiRequest<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init)
-  const body = await response.json()
+  const body = (await response.json()) as { error?: string; state?: AppState }
   if (!response.ok) {
-    throw new Error(body.error ?? 'Request failed.')
+    throw new ApiRequestError(body.error ?? 'Request failed.', body.state)
   }
   return body as T
 }
@@ -777,11 +992,29 @@ function formatDate(value: string): string {
   }).format(new Date(value))
 }
 
+function titleCase(value: string): string {
+  return value
+    .split(' ')
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+}
+
 function errorText(error: unknown): string {
   if (error instanceof Error) {
     return error.message
   }
   return 'Unexpected error.'
+}
+
+class ApiRequestError extends Error {
+  readonly state?: AppState
+
+  constructor(message: string, state?: AppState) {
+    super(message)
+    this.name = 'ApiRequestError'
+    this.state = state
+  }
 }
 
 export default App

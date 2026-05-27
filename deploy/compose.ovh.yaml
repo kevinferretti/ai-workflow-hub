@@ -1,0 +1,25 @@
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 5173
+    volumes:
+      - app-data:/app/.devflow
+    expose:
+      - "5173"
+    networks:
+      shipshape-ovh:
+        aliases:
+          - ai-workflow-hub
+
+volumes:
+  app-data:
+
+networks:
+  shipshape-ovh:
+    external: true
+    name: shipshape-ovh_default

@@ -44,6 +44,100 @@ describe('GitLabClient', () => {
     expect(normalizeBaseUrl('')).toBe('https://gitlab.com')
   })
 
+  it('lists pipeline jobs across GitLab pagination', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json([{ id: 8, name: 'codex_skill', status: 'success' }], {
+          headers: { 'x-next-page': '2' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json([{ id: 7, name: 'test', status: 'success' }], {
+          headers: { 'x-next-page': '' },
+        }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const client = new GitLabClient('https://gitlab.example', 'secret-token')
+    const jobs = await client.listPipelineJobs('group/repo', 42)
+
+    expect(jobs.map((job) => job.name)).toEqual(['codex_skill', 'test'])
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      'https://gitlab.example/api/v4/projects/group%2Frepo/pipelines/42/jobs?per_page=100&page=1',
+      expect.objectContaining({ method: 'GET' }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://gitlab.example/api/v4/projects/group%2Frepo/pipelines/42/jobs?per_page=100&page=2',
+      expect.objectContaining({ method: 'GET' }),
+    )
+  })
+
+  it('downloads a single job artifact file', async () => {
+    const fetchMock = vi.fn(async () => new Response('# Skill output\n'))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const client = new GitLabClient('https://gitlab.example', 'secret-token')
+    const content = await client.downloadJobArtifactFile(
+      'group/repo',
+      8,
+      'reports/skill output.md',
+    )
+
+    expect(content).toBe('# Skill output\n')
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://gitlab.example/api/v4/projects/group%2Frepo/jobs/8/artifacts/reports/skill%20output.md',
+      expect.objectContaining({ method: 'GET' }),
+    )
+  })
+
+  it('creates repository files when persisted output does not exist', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ message: '404 File Not Found' }, { status: 404 }))
+      .mockResolvedValueOnce(
+        Response.json(
+          { file_path: 'skill-runs/shipshape.md', branch: 'main' },
+          { status: 201 },
+        ),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const client = new GitLabClient('https://gitlab.example', 'secret-token')
+    const result = await client.upsertRepositoryFile(
+      'group/repo',
+      'main',
+      'skill-runs/shipshape.md',
+      '# Skill output\n',
+      'Persist Codex skill output',
+    )
+
+    expect(result).toEqual({
+      filePath: 'skill-runs/shipshape.md',
+      branch: 'main',
+      action: 'created',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      'https://gitlab.example/api/v4/projects/group%2Frepo/repository/files/skill-runs%2Fshipshape.md/raw?ref=main',
+      expect.objectContaining({ method: 'GET' }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://gitlab.example/api/v4/projects/group%2Frepo/repository/files/skill-runs%2Fshipshape.md',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          branch: 'main',
+          content: '# Skill output\n',
+          commit_message: 'Persist Codex skill output',
+        }),
+      }),
+    )
+  })
+
   it('throws a sanitized API error when GitLab rejects a request', async () => {
     vi.stubGlobal(
       'fetch',
