@@ -9,6 +9,7 @@ import {
   GitPullRequest,
   History,
   Loader2,
+  Pencil,
   Play,
   Plus,
   RefreshCw,
@@ -24,6 +25,7 @@ import type {
   ProjectConfig,
   SaveProjectRequest,
   WorkflowDefinition,
+  WorkflowOutputPersistence,
   WorkflowRun,
   WorkflowVariable,
 } from './shared/types.ts'
@@ -41,7 +43,14 @@ const emptyState: AppState = {
 const starterVariables =
   'WORKFLOW=codex_skill\nCODEX_SKILL=\nSKILL_OUTPUT_ARTIFACT=skill-output.md'
 
-const starterOutputPersistence = {
+type WorkflowFormOutputPersistence = WorkflowOutputPersistence & {
+  enabled: boolean
+  branchName: string
+  mergeRequestTargetBranch: string
+  mergeRequestTitle: string
+}
+
+const starterOutputPersistence: WorkflowFormOutputPersistence = {
   enabled: false,
   jobName: 'codex_skill',
   artifactPath: 'skill-output.md',
@@ -63,6 +72,7 @@ function App() {
   const [isSavingWorkflow, setIsSavingWorkflow] = useState(false)
   const [runningWorkflowId, setRunningWorkflowId] = useState('')
   const [refreshingRunId, setRefreshingRunId] = useState('')
+  const [editingWorkflowId, setEditingWorkflowId] = useState('')
   const [gitlabForm, setGitlabForm] = useState({
     baseUrl: 'https://gitlab.com',
     token: '',
@@ -79,7 +89,7 @@ function App() {
     description: '',
     defaultRef: '',
     variablesText: starterVariables,
-    outputPersistence: starterOutputPersistence,
+    outputPersistence: { ...starterOutputPersistence },
   })
   const [runForm, setRunForm] = useState({
     ref: '',
@@ -171,32 +181,30 @@ function App() {
   async function saveWorkflow(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setIsSavingWorkflow(true)
-    const nextState = await submitStateChange('/api/workflows', 'POST', {
-      name: workflowForm.name,
-      description: workflowForm.description,
-      defaultRef: workflowForm.defaultRef,
-      variables: parseVariables(workflowForm.variablesText),
-      outputPersistence: workflowForm.outputPersistence.enabled
-        ? {
-            jobName: workflowForm.outputPersistence.jobName,
-            artifactPath: workflowForm.outputPersistence.artifactPath,
-            repositoryPath: workflowForm.outputPersistence.repositoryPath,
-            commitMessage: workflowForm.outputPersistence.commitMessage,
-            branchName: workflowForm.outputPersistence.branchName,
-            mergeRequestTargetBranch:
-              workflowForm.outputPersistence.mergeRequestTargetBranch,
-            mergeRequestTitle: workflowForm.outputPersistence.mergeRequestTitle,
-          }
-        : undefined,
-    })
+    const nextState = await submitStateChange(
+      editingWorkflowId ? `/api/workflows/${editingWorkflowId}` : '/api/workflows',
+      editingWorkflowId ? 'PATCH' : 'POST',
+      {
+        name: workflowForm.name,
+        description: workflowForm.description,
+        defaultRef: workflowForm.defaultRef,
+        variables: parseVariables(workflowForm.variablesText),
+        outputPersistence: workflowForm.outputPersistence.enabled
+          ? {
+              jobName: workflowForm.outputPersistence.jobName,
+              artifactPath: workflowForm.outputPersistence.artifactPath,
+              repositoryPath: workflowForm.outputPersistence.repositoryPath,
+              commitMessage: workflowForm.outputPersistence.commitMessage,
+              branchName: workflowForm.outputPersistence.branchName,
+              mergeRequestTargetBranch:
+                workflowForm.outputPersistence.mergeRequestTargetBranch,
+              mergeRequestTitle: workflowForm.outputPersistence.mergeRequestTitle,
+            }
+          : undefined,
+      },
+    )
     if (nextState) {
-      setWorkflowForm({
-        name: '',
-        description: '',
-        defaultRef: '',
-        variablesText: starterVariables,
-        outputPersistence: starterOutputPersistence,
-      })
+      resetWorkflowForm()
     }
     setIsSavingWorkflow(false)
   }
@@ -254,6 +262,9 @@ function App() {
 
   async function deleteWorkflow(workflow: WorkflowDefinition) {
     await submitStateChange(`/api/workflows/${workflow.id}`, 'DELETE')
+    if (workflow.id === editingWorkflowId) {
+      resetWorkflowForm()
+    }
   }
 
   function selectProject(project: ProjectConfig) {
@@ -285,7 +296,7 @@ function App() {
   }
 
   function updateWorkflowOutputPersistence(
-    patch: Partial<typeof starterOutputPersistence>,
+    patch: Partial<WorkflowFormOutputPersistence>,
   ) {
     setWorkflowForm((current) => ({
       ...current,
@@ -294,6 +305,28 @@ function App() {
         ...patch,
       },
     }))
+  }
+
+  function editWorkflow(workflow: WorkflowDefinition) {
+    setEditingWorkflowId(workflow.id)
+    setWorkflowForm({
+      name: workflow.name,
+      description: workflow.description,
+      defaultRef: workflow.defaultRef,
+      variablesText: variablesToText(workflow.variables),
+      outputPersistence: toWorkflowFormOutputPersistence(workflow.outputPersistence),
+    })
+  }
+
+  function resetWorkflowForm() {
+    setEditingWorkflowId('')
+    setWorkflowForm({
+      name: '',
+      description: '',
+      defaultRef: '',
+      variablesText: starterVariables,
+      outputPersistence: { ...starterOutputPersistence },
+    })
   }
 
   async function submitStateChange(
@@ -504,6 +537,15 @@ function App() {
                     ) : null}
                   </div>
                   <div className="row-actions">
+                    <button
+                      type="button"
+                      className="icon-button quiet"
+                      aria-label={`Edit ${workflow.name}`}
+                      title={`Edit ${workflow.name}`}
+                      onClick={() => editWorkflow(workflow)}
+                    >
+                      <Pencil size={16} aria-hidden="true" />
+                    </button>
                     <button
                       type="button"
                       className="icon-button quiet"
@@ -746,7 +788,7 @@ function App() {
           <form className="panel config-panel" onSubmit={(event) => void saveWorkflow(event)}>
             <div className="panel-heading">
               <div>
-                <h2>Add Workflow</h2>
+                <h2>{editingWorkflowId ? 'Edit Workflow' : 'Add Workflow'}</h2>
                 <p>Pipeline variable set</p>
               </div>
               <TerminalSquare size={18} aria-hidden="true" />
@@ -902,14 +944,28 @@ function App() {
                 </label>
               </div>
             ) : null}
-            <button type="submit" className="primary-button" disabled={isSavingWorkflow}>
-              {isSavingWorkflow ? (
-                <Loader2 size={16} className="spin" aria-hidden="true" />
-              ) : (
-                <Plus size={16} aria-hidden="true" />
-              )}
-              Add workflow
-            </button>
+            <div className="form-actions">
+              {editingWorkflowId ? (
+                <button
+                  type="button"
+                  className="icon-button"
+                  disabled={isSavingWorkflow}
+                  onClick={resetWorkflowForm}
+                >
+                  Cancel
+                </button>
+              ) : null}
+              <button type="submit" className="primary-button" disabled={isSavingWorkflow}>
+                {isSavingWorkflow ? (
+                  <Loader2 size={16} className="spin" aria-hidden="true" />
+                ) : editingWorkflowId ? (
+                  <Save size={16} aria-hidden="true" />
+                ) : (
+                  <Plus size={16} aria-hidden="true" />
+                )}
+                {editingWorkflowId ? 'Update workflow' : 'Add workflow'}
+              </button>
+            </div>
           </form>
         </section>
 
@@ -1034,6 +1090,29 @@ function parseVariables(text: string): WorkflowVariable[] {
       }
     })
     .filter((variable) => variable.key.length > 0)
+}
+
+function variablesToText(variables: WorkflowVariable[]): string {
+  return variables.map((variable) => `${variable.key}=${variable.value}`).join('\n')
+}
+
+function toWorkflowFormOutputPersistence(
+  outputPersistence: WorkflowOutputPersistence | undefined,
+): WorkflowFormOutputPersistence {
+  if (!outputPersistence) {
+    return { ...starterOutputPersistence }
+  }
+
+  return {
+    enabled: true,
+    jobName: outputPersistence.jobName,
+    artifactPath: outputPersistence.artifactPath,
+    repositoryPath: outputPersistence.repositoryPath,
+    commitMessage: outputPersistence.commitMessage,
+    branchName: outputPersistence.branchName ?? '',
+    mergeRequestTargetBranch: outputPersistence.mergeRequestTargetBranch ?? '',
+    mergeRequestTitle: outputPersistence.mergeRequestTitle ?? '',
+  }
 }
 
 function formatDate(value: string): string {
