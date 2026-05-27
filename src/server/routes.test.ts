@@ -50,6 +50,8 @@ describe('workflow API', () => {
       listPipelineJobs: vi.fn(),
       downloadJobArtifactFile: vi.fn(),
       upsertRepositoryFile: vi.fn(),
+      ensureRepositoryBranch: vi.fn(),
+      findOrCreateMergeRequest: vi.fn(),
     }
     const app = createApiApp({
       store,
@@ -114,12 +116,16 @@ describe('workflow API', () => {
       branch: 'main',
       action: 'created' as const,
     }))
+    const ensureRepositoryBranch = vi.fn()
+    const findOrCreateMergeRequest = vi.fn()
     const gitlabClient: GitLabClientLike = {
       createPipeline,
       getPipeline,
       listPipelineJobs,
       downloadJobArtifactFile,
       upsertRepositoryFile,
+      ensureRepositoryBranch,
+      findOrCreateMergeRequest,
     }
     const app = createApiApp({
       store,
@@ -178,11 +184,120 @@ describe('workflow API', () => {
       '# Skill output\n',
       'Persist Codex skill output',
     )
+    expect(ensureRepositoryBranch).not.toHaveBeenCalled()
+    expect(findOrCreateMergeRequest).not.toHaveBeenCalled()
     expect(response.body.runs[0].outputPersistence).toMatchObject({
       status: 'persisted',
       action: 'created',
       jobId: 8,
       repositoryPath: 'skill-runs/shipshape.md',
+    })
+  })
+
+  it('persists a successful skill artifact to a branch and opens a merge request', async () => {
+    const store = new ConfigStore(join(tempDir, 'config.json'))
+    const createPipeline = vi.fn(async () => ({
+      id: 123,
+      iid: 4,
+      status: 'pending' as const,
+      web_url: 'https://gitlab.example/group/repo/-/pipelines/123',
+    }))
+    const getPipeline = vi.fn(async () => ({
+      id: 123,
+      iid: 4,
+      status: 'success' as const,
+      web_url: 'https://gitlab.example/group/repo/-/pipelines/123',
+    }))
+    const listPipelineJobs = vi.fn(async () => [
+      { id: 8, name: 'codex_skill', status: 'success' as const },
+    ])
+    const downloadJobArtifactFile = vi.fn(async () => '# Skill output\n')
+    const ensureRepositoryBranch = vi.fn()
+    const upsertRepositoryFile = vi.fn(async () => ({
+      filePath: 'gaps/GAPS-PRD.md',
+      branch: 'codex/prd-gaps-output',
+      action: 'updated' as const,
+    }))
+    const findOrCreateMergeRequest = vi.fn(async () => ({
+      iid: 13,
+      web_url: 'https://gitlab.example/team/shipshape/-/merge_requests/13',
+      source_branch: 'codex/prd-gaps-output',
+      target_branch: 'main',
+    }))
+    const gitlabClient: GitLabClientLike = {
+      createPipeline,
+      getPipeline,
+      listPipelineJobs,
+      downloadJobArtifactFile,
+      upsertRepositoryFile,
+      ensureRepositoryBranch,
+      findOrCreateMergeRequest,
+    }
+    const app = createApiApp({
+      store,
+      gitlabClientFactory: () => gitlabClient,
+    })
+
+    await request(app).put('/api/settings/gitlab').send({
+      baseUrl: 'https://gitlab.example',
+      token: 'secret-token',
+    })
+    const projectResponse = await request(app).post('/api/projects').send({
+      name: 'Shipshape',
+      gitlabProjectId: 'team/shipshape',
+      defaultRef: 'main',
+      repositoryUrl: 'https://gitlab.example/team/shipshape',
+      description: '',
+    })
+    const workflowResponse = await request(app).post('/api/workflows').send({
+      name: 'PRD Gap Analysis',
+      description: '',
+      defaultRef: '',
+      variables: [{ key: 'CODEX_SKILL', value: 'PRD-gaps' }],
+      outputPersistence: {
+        jobName: 'codex_skill',
+        artifactPath: 'gaps/GAPS-PRD.md',
+        repositoryPath: 'gaps/GAPS-PRD.md',
+        commitMessage: 'Persist PRD gap analysis',
+        branchName: 'codex/prd-gaps-output',
+        mergeRequestTargetBranch: 'main',
+        mergeRequestTitle: 'Persist PRD gap analysis',
+      },
+    })
+    const runResponse = await request(app).post('/api/runs').send({
+      projectId: projectResponse.body.projects[0].id,
+      workflowId: workflowResponse.body.workflows[0].id,
+    })
+
+    const response = await request(app).post(
+      `/api/runs/${runResponse.body.runs[0].id}/refresh`,
+    )
+
+    expect(response.status).toBe(200)
+    expect(ensureRepositoryBranch).toHaveBeenCalledWith(
+      'team/shipshape',
+      'codex/prd-gaps-output',
+      'main',
+    )
+    expect(upsertRepositoryFile).toHaveBeenCalledWith(
+      'team/shipshape',
+      'codex/prd-gaps-output',
+      'gaps/GAPS-PRD.md',
+      '# Skill output\n',
+      'Persist PRD gap analysis',
+    )
+    expect(findOrCreateMergeRequest).toHaveBeenCalledWith(
+      'team/shipshape',
+      'codex/prd-gaps-output',
+      'main',
+      'Persist PRD gap analysis',
+    )
+    expect(response.body.runs[0].outputPersistence).toMatchObject({
+      status: 'persisted',
+      action: 'updated',
+      branch: 'codex/prd-gaps-output',
+      mergeRequestIid: 13,
+      mergeRequestUrl: 'https://gitlab.example/team/shipshape/-/merge_requests/13',
     })
   })
 })

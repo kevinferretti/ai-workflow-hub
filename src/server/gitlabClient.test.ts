@@ -138,6 +138,67 @@ describe('GitLabClient', () => {
     )
   })
 
+  it('creates repository branches from a base ref when missing', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ message: '404 Branch Not Found' }, { status: 404 }))
+      .mockResolvedValueOnce(Response.json({ name: 'codex/prd-gaps-output' }, { status: 201 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const client = new GitLabClient('https://gitlab.example', 'secret-token')
+    await client.ensureRepositoryBranch(
+      'group/repo',
+      'codex/prd-gaps-output',
+      'main',
+    )
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      'https://gitlab.example/api/v4/projects/group%2Frepo/repository/branches/codex%2Fprd-gaps-output',
+      expect.objectContaining({ method: 'GET' }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://gitlab.example/api/v4/projects/group%2Frepo/repository/branches',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          branch: 'codex/prd-gaps-output',
+          ref: 'main',
+        }),
+      }),
+    )
+  })
+
+  it('reuses an open merge request for a persistence branch', async () => {
+    const fetchMock = vi.fn(async () =>
+      Response.json([
+        {
+          iid: 13,
+          web_url: 'https://gitlab.example/group/repo/-/merge_requests/13',
+          source_branch: 'codex/prd-gaps-output',
+          target_branch: 'main',
+        },
+      ]),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const client = new GitLabClient('https://gitlab.example', 'secret-token')
+    const mergeRequest = await client.findOrCreateMergeRequest(
+      'group/repo',
+      'codex/prd-gaps-output',
+      'main',
+      'Persist PRD gap analysis',
+    )
+
+    expect(mergeRequest.iid).toBe(13)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://gitlab.example/api/v4/projects/group%2Frepo/merge_requests?state=opened&source_branch=codex%2Fprd-gaps-output&target_branch=main',
+      expect.objectContaining({ method: 'GET' }),
+    )
+  })
+
   it('throws a sanitized API error when GitLab rejects a request', async () => {
     vi.stubGlobal(
       'fetch',

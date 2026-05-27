@@ -47,6 +47,9 @@ const starterOutputPersistence = {
   artifactPath: 'skill-output.md',
   repositoryPath: 'skill-runs/skill-output.md',
   commitMessage: 'Persist Codex skill output',
+  branchName: 'codex/skill-output',
+  mergeRequestTargetBranch: 'main',
+  mergeRequestTitle: 'Persist Codex skill output',
 }
 
 function App() {
@@ -179,6 +182,10 @@ function App() {
             artifactPath: workflowForm.outputPersistence.artifactPath,
             repositoryPath: workflowForm.outputPersistence.repositoryPath,
             commitMessage: workflowForm.outputPersistence.commitMessage,
+            branchName: workflowForm.outputPersistence.branchName,
+            mergeRequestTargetBranch:
+              workflowForm.outputPersistence.mergeRequestTargetBranch,
+            mergeRequestTitle: workflowForm.outputPersistence.mergeRequestTitle,
           }
         : undefined,
     })
@@ -561,11 +568,25 @@ function App() {
                         }
                       >
                         Output {run.outputPersistence.status}: {run.outputPersistence.repositoryPath}
+                        {run.outputPersistence.branch
+                          ? ` on ${run.outputPersistence.branch}`
+                          : ''}
                         {run.outputPersistence.error ? ` - ${run.outputPersistence.error}` : ''}
                       </p>
                     ) : null}
                   </div>
                   <div className="row-actions">
+                    {run.outputPersistence?.mergeRequestUrl ? (
+                      <a
+                        className="icon-button quiet"
+                        href={run.outputPersistence.mergeRequestUrl}
+                        rel="noreferrer"
+                        target="_blank"
+                        title="Open merge request"
+                      >
+                        <GitPullRequest size={16} aria-hidden="true" />
+                      </a>
+                    ) : null}
                     {run.webUrl ? (
                       <a
                         className="icon-button quiet"
@@ -844,6 +865,41 @@ function App() {
                       })
                     }
                     required
+                  />
+                </label>
+                <label>
+                  Persistence branch
+                  <input
+                    value={workflowForm.outputPersistence.branchName}
+                    onChange={(event) =>
+                      updateWorkflowOutputPersistence({
+                        branchName: event.target.value,
+                      })
+                    }
+                    placeholder="Leave blank to commit to the run ref"
+                  />
+                </label>
+                <label>
+                  MR target branch
+                  <input
+                    value={workflowForm.outputPersistence.mergeRequestTargetBranch}
+                    onChange={(event) =>
+                      updateWorkflowOutputPersistence({
+                        mergeRequestTargetBranch: event.target.value,
+                      })
+                    }
+                    placeholder="Leave blank to skip MR creation"
+                  />
+                </label>
+                <label>
+                  MR title
+                  <input
+                    value={workflowForm.outputPersistence.mergeRequestTitle}
+                    onChange={(event) =>
+                      updateWorkflowOutputPersistence({
+                        mergeRequestTitle: event.target.value,
+                      })
+                    }
                   />
                 </label>
               </div>

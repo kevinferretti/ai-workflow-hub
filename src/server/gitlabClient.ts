@@ -20,6 +20,13 @@ export type RepositoryFileUpsertResult = {
   action: 'created' | 'updated' | 'unchanged'
 }
 
+export type GitLabMergeRequest = {
+  iid: number
+  web_url?: string
+  source_branch: string
+  target_branch: string
+}
+
 export class GitLabApiError extends Error {
   readonly status: number
 
@@ -138,6 +145,77 @@ export class GitLabClient {
     }
   }
 
+  async ensureRepositoryBranch(
+    projectId: string,
+    branch: string,
+    ref: string,
+  ): Promise<void> {
+    const normalizedBranch = normalizeBranchName(branch)
+    try {
+      await this.requestJson<unknown>(
+        `/projects/${encodeURIComponent(projectId)}/repository/branches/${encodeURIComponent(normalizedBranch)}`,
+        {
+          method: 'GET',
+        },
+      )
+      return
+    } catch (error) {
+      if (!(error instanceof GitLabApiError) || error.status !== 404) {
+        throw error
+      }
+    }
+
+    await this.requestJson<unknown>(
+      `/projects/${encodeURIComponent(projectId)}/repository/branches`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          branch: normalizedBranch,
+          ref,
+        }),
+      },
+    )
+  }
+
+  async findOrCreateMergeRequest(
+    projectId: string,
+    sourceBranch: string,
+    targetBranch: string,
+    title: string,
+  ): Promise<GitLabMergeRequest> {
+    const source = normalizeBranchName(sourceBranch)
+    const target = normalizeBranchName(targetBranch)
+    const query = new URLSearchParams({
+      state: 'opened',
+      source_branch: source,
+      target_branch: target,
+    })
+    const existing = await this.requestJson<GitLabMergeRequest[]>(
+      `/projects/${encodeURIComponent(projectId)}/merge_requests?${query.toString()}`,
+      {
+        method: 'GET',
+      },
+    )
+
+    const mergeRequest = existing[0]
+    if (mergeRequest) {
+      return mergeRequest
+    }
+
+    return this.requestJson<GitLabMergeRequest>(
+      `/projects/${encodeURIComponent(projectId)}/merge_requests`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          source_branch: source,
+          target_branch: target,
+          title,
+          remove_source_branch: false,
+        }),
+      },
+    )
+  }
+
   async getPipeline(
     projectId: string,
     pipelineId: number,
@@ -245,6 +323,20 @@ function normalizeRepositoryPath(rawPath: string): string {
     normalized.split('/').some((part) => part === '' || part === '.' || part === '..')
   ) {
     throw new GitLabApiError(400, 'Repository file path is invalid.')
+  }
+
+  return normalized
+}
+
+function normalizeBranchName(rawBranch: string): string {
+  const normalized = rawBranch.trim()
+
+  if (
+    normalized.length === 0 ||
+    normalized.includes(' ') ||
+    normalized.split('/').some((part) => part === '' || part === '.' || part === '..')
+  ) {
+    throw new GitLabApiError(400, 'Repository branch name is invalid.')
   }
 
   return normalized

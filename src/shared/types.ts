@@ -22,6 +22,9 @@ export type WorkflowOutputPersistence = {
   artifactPath: string
   repositoryPath: string
   commitMessage: string
+  branchName?: string
+  mergeRequestTargetBranch?: string
+  mergeRequestTitle?: string
 }
 
 export type WorkflowDefinition = {
@@ -58,6 +61,9 @@ export type WorkflowRunOutputPersistence = WorkflowOutputPersistence & {
   status: WorkflowRunOutputPersistenceStatus
   jobId?: number
   action?: 'created' | 'updated' | 'unchanged'
+  branch?: string
+  mergeRequestIid?: number
+  mergeRequestUrl?: string
   updatedAt?: string
   error?: string
 }

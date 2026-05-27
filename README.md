@@ -45,9 +45,12 @@ Artifact job: codex_skill
 Artifact path: skill-output.md
 Repository path: skill-runs/shipshape.md
 Commit message: Persist Codex skill output
+Persistence branch: codex/skill-output
+MR target branch: main
+MR title: Persist Codex skill output
 ```
 
-When a refresh sees the pipeline in `success`, the app lists the exact pipeline jobs, downloads `Artifact path` from `Artifact job`, and creates or updates `Repository path` on the run ref. Missing jobs, missing artifacts, failed artifact jobs, and GitLab commit failures are recorded as output persistence failures.
+When a refresh sees the pipeline in `success`, the app lists the exact pipeline jobs, downloads `Artifact path` from `Artifact job`, and creates or updates `Repository path`. If `Persistence branch` is set, the app creates or reuses that branch from the run ref, commits the artifact there, and creates or reuses an MR into `MR target branch`. If `Persistence branch` is blank, the app commits directly to the run ref. Missing jobs, missing artifacts, failed artifact jobs, and GitLab commit/MR failures are recorded as output persistence failures.
 
 The target repository must have a CI job that writes the artifact path. A typical contract is:
 

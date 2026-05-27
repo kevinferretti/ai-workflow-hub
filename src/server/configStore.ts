@@ -46,6 +46,9 @@ const workflowSchema = z.object({
       artifactPath: z.string(),
       repositoryPath: z.string(),
       commitMessage: z.string(),
+      branchName: z.string().optional(),
+      mergeRequestTargetBranch: z.string().optional(),
+      mergeRequestTitle: z.string().optional(),
     })
     .optional(),
 })
@@ -71,9 +74,15 @@ const runSchema = z.object({
       artifactPath: z.string(),
       repositoryPath: z.string(),
       commitMessage: z.string(),
+      branchName: z.string().optional(),
+      mergeRequestTargetBranch: z.string().optional(),
+      mergeRequestTitle: z.string().optional(),
       status: z.enum(['pending', 'persisted', 'unchanged', 'failed']),
       jobId: z.number().optional(),
       action: z.enum(['created', 'updated', 'unchanged']).optional(),
+      branch: z.string().optional(),
+      mergeRequestIid: z.number().optional(),
+      mergeRequestUrl: z.string().optional(),
       updatedAt: z.string().optional(),
       error: z.string().optional(),
     })

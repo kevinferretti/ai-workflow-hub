@@ -24,6 +24,8 @@ export type GitLabClientLike = Pick<
   | 'listPipelineJobs'
   | 'downloadJobArtifactFile'
   | 'upsertRepositoryFile'
+  | 'ensureRepositoryBranch'
+  | 'findOrCreateMergeRequest'
 >
 
 export type CreateApiRouterOptions = {
@@ -62,6 +64,9 @@ const saveWorkflowSchema = z.object({
       artifactPath: z.string().trim().min(1),
       repositoryPath: z.string().trim().min(1),
       commitMessage: z.string().trim().min(1),
+      branchName: z.string().trim().optional(),
+      mergeRequestTargetBranch: z.string().trim().optional(),
+      mergeRequestTitle: z.string().trim().optional(),
     })
     .optional(),
 })
@@ -490,19 +495,41 @@ async function persistRunOutput(
     job.id,
     run.outputPersistence.artifactPath,
   )
+  const outputBranch = run.outputPersistence.branchName || run.ref
+  if (outputBranch !== run.ref) {
+    await client.ensureRepositoryBranch(projectId, outputBranch, run.ref)
+  }
+
   const result = await client.upsertRepositoryFile(
     projectId,
-    run.ref,
+    outputBranch,
     run.outputPersistence.repositoryPath,
     content,
     run.outputPersistence.commitMessage,
   )
+  const mergeRequestTargetBranch =
+    run.outputPersistence.mergeRequestTargetBranch?.trim()
+  const mergeRequest =
+    result.action !== 'unchanged' &&
+    mergeRequestTargetBranch &&
+    mergeRequestTargetBranch !== result.branch
+      ? await client.findOrCreateMergeRequest(
+          projectId,
+          result.branch,
+          mergeRequestTargetBranch,
+          run.outputPersistence.mergeRequestTitle ||
+            run.outputPersistence.commitMessage,
+        )
+      : undefined
 
   return {
     ...run.outputPersistence,
     repositoryPath: result.filePath,
     status: result.action === 'unchanged' ? 'unchanged' : 'persisted',
     action: result.action,
+    branch: result.branch,
+    mergeRequestIid: mergeRequest?.iid,
+    mergeRequestUrl: mergeRequest?.web_url,
     jobId: job.id,
     updatedAt: new Date().toISOString(),
     error: undefined,
