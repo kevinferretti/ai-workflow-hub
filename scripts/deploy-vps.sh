@@ -85,9 +85,6 @@ for attempt in $(seq 1 20); do
 done
 
 current_release="$(readlink -f "$remote_dir/current")"
-find "$remote_dir/releases" -mindepth 1 -maxdepth 1 -type d ! -samefile "$current_release" -printf '%T@ %p\n' \
-  | sort -n \
-  | head -n -4 \
-  | cut -d' ' -f2- \
+find "$remote_dir/releases" -mindepth 1 -maxdepth 1 -type d ! -samefile "$current_release" -print \
   | xargs -r rm -rf
 REMOTE_SCRIPT

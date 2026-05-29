@@ -42,7 +42,8 @@ bash scripts/deploy-vps.sh
 Both scripts package the current tracked and unignored working tree, upload it
 to the VPS, create a release, rebuild the app container, attach it to the shared
 `edge-proxy` Docker network, and verify the app's internal health endpoint.
-Route changes belong in `kevinferretti/ovh-edge-proxy`.
+After a successful deploy, non-current releases are removed. Route changes
+belong in `kevinferretti/ovh-edge-proxy`.
 
 ## Continuous Deployment
 
