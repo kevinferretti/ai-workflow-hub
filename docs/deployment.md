@@ -7,22 +7,23 @@ AI Workflow Hub is deployed to the OVH VPS at `15.204.255.0` and served at
 
 - Public DNS: `workflow.kevinferretti.com A 15.204.255.0`
 - SSH from this workstation: `ai-workflow-ovh`
-- GitHub Actions SSH target: `ubuntu@15.204.255.0`
-- App release directory: `/home/ubuntu/ai-workflow-hub`
-- Current release symlink: `/home/ubuntu/ai-workflow-hub/current`
+- GitHub Actions SSH target: `ubuntu@movement.kevinferretti.com`
+- App release directory: `/opt/ai-workflow-hub`
+- Current release symlink: `/opt/ai-workflow-hub/current`
 - App container: `ai-workflow-hub-app-1`
-- Docker network: `shipshape-ovh_default`
-- Public proxy: existing `shipshape-ovh-caddy-1` container
-- Managed Caddyfile: `/opt/shipshape/src/deploy/ovh/Caddyfile`
+- Docker network: `edge-proxy`
+- Public proxy: shared `edge-proxy-caddy-1` container
+- Managed Caddyfile: `/opt/edge-proxy/Caddyfile`, sourced from `kevinferretti/ovh-edge-proxy`
 
-The app container is not published on host ports. Caddy is the only public
-entrypoint on ports 80 and 443, terminates TLS with Let's Encrypt, requires
-HTTP basic auth, and reverse-proxies to `ai-workflow-hub:5173` on the shared
-Docker network.
+The app container is not published on host ports. The shared edge Caddy stack is
+the only public entrypoint on ports 80 and 443, terminates TLS with Let's
+Encrypt, requires HTTP basic auth, and reverse-proxies to `ai-workflow-hub:5173`
+on the shared `edge-proxy` Docker network.
 
-Do not commit the basic-auth password or GitLab token. The auth hash lives on
-the VPS in `/home/ubuntu/ai-workflow-hub/.env`, and app state including the
-GitLab token is persisted in the Docker volume mounted at `/app/.devflow`.
+Do not commit the basic-auth password or GitLab token. The edge proxy auth
+snippet lives on the VPS at
+`/opt/edge-proxy/secrets/ai-workflow-hub-auth.caddy`, and app state including
+the GitLab token is persisted in the Docker volume mounted at `/app/.devflow`.
 
 ## Manual Deploy
 
@@ -39,8 +40,9 @@ bash scripts/deploy-vps.sh
 ```
 
 Both scripts package the current tracked and unignored working tree, upload it
-to the VPS, create a timestamped release, rebuild the app container, update the
-marked `# BEGIN ai-workflow-hub` Caddy block, validate Caddy, and reload it.
+to the VPS, create a release, rebuild the app container, attach it to the shared
+`edge-proxy` Docker network, and verify the app's internal health endpoint.
+Route changes belong in `kevinferretti/ovh-edge-proxy`.
 
 ## Continuous Deployment
 
@@ -71,14 +73,14 @@ OVH_SSH_KNOWN_HOSTS
 Actions on this workstation:
 
 ```powershell
-Get-Content $HOME\.ssh\ai-workflow-hub_github_actions_ed25519 -Raw
+Get-Content $HOME\.ssh\ai-workflow-ovh_ed25519 -Raw
 ```
 
 `OVH_SSH_KNOWN_HOSTS` should pin the VPS host key. Use the existing trusted
 entry from this workstation:
 
 ```powershell
-ssh-keygen -F 15.204.255.0 | Where-Object { $_ -notmatch '^#' }
+ssh-keygen -F movement.kevinferretti.com | Where-Object { $_ -notmatch '^#' }
 ```
 
 The matching public key is already authorized on the VPS for the `ubuntu` user.
@@ -100,5 +102,5 @@ curl -u '<user>:<password>' https://workflow.kevinferretti.com/api/state
 Check the running container:
 
 ```bash
-ssh ai-workflow-ovh "docker compose --project-name ai-workflow-hub -f /home/ubuntu/ai-workflow-hub/current/deploy/compose.ovh.yaml ps"
+ssh ai-workflow-ovh "docker compose --project-name ai-workflow-hub -f /opt/ai-workflow-hub/current/deploy/compose.ovh.yaml ps"
 ```

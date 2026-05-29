@@ -12,7 +12,7 @@ services:
     expose:
       - "5173"
     networks:
-      shipshape-ovh:
+      edge-proxy:
         aliases:
           - ai-workflow-hub
 
@@ -20,6 +20,5 @@ volumes:
   app-data:
 
 networks:
-  shipshape-ovh:
+  edge-proxy:
     external: true
-    name: shipshape-ovh_default

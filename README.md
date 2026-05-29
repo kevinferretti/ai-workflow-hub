@@ -76,11 +76,11 @@ npm run build
 
 ## Deploy to OVH VPS
 
-The production deployment uses Docker Compose with Caddy in front of the
-Express app. Caddy terminates HTTPS for `workflow.kevinferretti.com` and
-requires HTTP basic auth before any request reaches the app. The app container
-is not published directly, and `.devflow/config.json` is persisted in a Docker
-volume.
+The production deployment uses Docker Compose for the app container and the
+shared `kevinferretti/ovh-edge-proxy` Caddy stack for public HTTPS routing.
+Caddy terminates HTTPS for `workflow.kevinferretti.com` and requires HTTP basic
+auth before any request reaches the app. The app container is not published
+directly, and `.devflow/config.json` is persisted in a Docker volume.
 
 1. Point DNS at the VPS:
 
@@ -90,8 +90,8 @@ workflow.kevinferretti.com A 15.204.255.0
 
 2. Install Docker and the Compose plugin on the VPS, then allow only SSH, HTTP,
    and HTTPS through the VPS firewall. On the current OVH host, SSH is configured
-   as `ai-workflow-ovh` and the existing public Caddy container owns ports 80
-   and 443.
+   as `ai-workflow-ovh` and the shared `edge-proxy-caddy-1` container owns ports
+   80 and 443.
 
 3. Generate a Caddy password hash on a machine with Docker:
 
@@ -99,12 +99,13 @@ workflow.kevinferretti.com A 15.204.255.0
 docker run --rm -it caddy:2-alpine caddy hash-password
 ```
 
-4. On the VPS, create `/home/ubuntu/ai-workflow-hub/.env` from
-   `.env.deploy.example` and set:
+4. In the `kevinferretti/ovh-edge-proxy` deployment, create
+   `/opt/edge-proxy/secrets/ai-workflow-hub-auth.caddy`:
 
-```text
-BASIC_AUTH_USER=kevin
-BASIC_AUTH_HASH=<output from caddy hash-password>
+```caddy
+basic_auth {
+	kevin <output from caddy hash-password>
+}
 ```
 
 5. From this repo on Windows, deploy the current working tree:
@@ -116,13 +117,11 @@ BASIC_AUTH_HASH=<output from caddy hash-password>
 6. Check the deployment:
 
 ```bash
-ssh ai-workflow-ovh "cd /home/ubuntu/ai-workflow-hub/current && docker compose --project-name ai-workflow-hub -f deploy/compose.ovh.yaml ps"
+ssh ai-workflow-ovh "cd /opt/ai-workflow-hub/current && docker compose --project-name ai-workflow-hub -f deploy/compose.ovh.yaml ps"
 ```
 
-The first deploy intentionally stops after creating
-`/home/ubuntu/ai-workflow-hub/.env` if the file does not already exist. Fill in
-the basic-auth values, rerun the script, and Caddy will request the TLS
-certificate once DNS resolves.
+Route and basic-auth changes belong in the edge proxy repo; app deploys only
+build and restart the `ai-workflow-hub` app container.
 
 See `docs/deployment.md` for the current production topology, GitHub Actions
 CI/CD setup, required repository secrets, and verification commands.

@@ -73,7 +73,7 @@ jobs:
 
           cat > ~/.ssh/config <<'SSH_CONFIG'
           Host ai-workflow-ovh
-            HostName 15.204.255.0
+            HostName movement.kevinferretti.com
             User ubuntu
             IdentityFile ~/.ssh/ai-workflow-ovh_ed25519
             IdentitiesOnly yes
@@ -83,3 +83,23 @@ jobs:
 
       - name: Deploy to OVH
         run: bash scripts/deploy-vps.sh
+
+      - name: Verify public route
+        run: |
+          set -euo pipefail
+          status="$(
+            curl \
+              --silent \
+              --show-error \
+              --output /dev/null \
+              --write-out '%{http_code}' \
+              --retry 10 \
+              --retry-delay 3 \
+              --retry-all-errors \
+              https://workflow.kevinferretti.com/api/state
+          )"
+
+          if [ "$status" != "401" ]; then
+            echo "Expected workflow.kevinferretti.com to require authentication, got HTTP $status." >&2
+            exit 1
+          fi
